@@ -73,8 +73,8 @@ void particle_system::init_gl() {
 }
 
 void particle_system::init_gl_particle() {
-	GLuint vertex_shader = particle::gl::compile_shader("shaders/particle.vert", GL_VERTEX_SHADER);
-	GLuint fragment_shader = particle::gl::compile_shader("shaders/particle.frag", GL_FRAGMENT_SHADER);
+	GLuint vertex_shader = particle::gl::compile_shader("shaders/gl/particle.vert", GL_VERTEX_SHADER);
+	GLuint fragment_shader = particle::gl::compile_shader("shaders/gl/particle.frag", GL_FRAGMENT_SHADER);
 	gl_particle_program = glCreateProgram();
 	glAttachShader(gl_particle_program, vertex_shader);
 	glAttachShader(gl_particle_program, fragment_shader);
@@ -141,8 +141,8 @@ void particle_system::init_gl_particle() {
 }
 
 void particle_system::init_gl_world() {
-	GLuint vertex_shader = particle::gl::compile_shader("shaders/world.vert", GL_VERTEX_SHADER);
-	GLuint fragment_shader = particle::gl::compile_shader("shaders/world.frag", GL_FRAGMENT_SHADER);
+	GLuint vertex_shader = particle::gl::compile_shader("shaders/gl/world.vert", GL_VERTEX_SHADER);
+	GLuint fragment_shader = particle::gl::compile_shader("shaders/gl/world.frag", GL_FRAGMENT_SHADER);
 	gl_world_program = glCreateProgram();
 	glAttachShader(gl_world_program, vertex_shader);
 	glAttachShader(gl_world_program, fragment_shader);
@@ -177,9 +177,9 @@ void particle_system::init_gl_world() {
 
 void particle_system::init_cl() {
 	particle::cl::init_opencl(&device, &context, &command_queue);
-	particle::cl::build_program(device, context, &cl_particle_simulation_program, "shaders/particle_simulation.cl");
-	particle::cl::build_program(device, context, &cl_bitonic_program, "shaders/bitonic_sort.cl");
-	particle::cl::build_program(device, context, &cl_bvh_program, "shaders/bvh.cl");
+	particle::cl::build_program(device, context, &cl_particle_simulation_program, "shaders/cl/particle_simulation.cl");
+	particle::cl::build_program(device, context, &cl_bitonic_program, "shaders/cl/bitonic_sort.cl");
+	particle::cl::build_program(device, context, &cl_bvh_program, "shaders/cl/bvh.cl");
 	
 
 	cl_int error = CL_SUCCESS;
