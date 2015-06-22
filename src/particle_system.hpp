@@ -9,9 +9,11 @@
 
 
 class particle_system {
+	GLFWwindow* window;
 	const unsigned int width = 2000;
 	const unsigned int height = 1400;
 	bool mouse_pressed = false;
+	bool sim = false;
 	float mouse_x = 0;
 	float mouse_y = 0;
 	glm::vec3 eye;
@@ -20,17 +22,16 @@ class particle_system {
 
 
 	//ogl
-	GLFWwindow* window;
-
-	
 	GLuint gl_particle_program;
-	GLuint gl_partcile_vao[2];
+	GLuint gl_particle_vao[2];
 	GLuint gl_positions[2];
 	GLuint gl_particle_colors[2];
 
 	GLuint gl_world_program;
 	GLuint gl_world_vao;
 	GLuint gl_world_positions;
+
+
 
 	//ocl
 	cl_device_id device;

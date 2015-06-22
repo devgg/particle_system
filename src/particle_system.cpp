@@ -27,6 +27,18 @@ void particle_system::init_gl() {
 	glViewport(0, 0, width, height);
 	glPointSize(10.f);
 
+	auto key_callback = [](GLFWwindow* window, int key, int scancode, int action, int mods) {
+		particle_system* ps = static_cast<particle_system*>(glfwGetWindowUserPointer(window));
+		if (key == GLFW_KEY_X && action != GLFW_REPEAT) {
+			if (ps->sim) {
+				ps->time -= glfwGetTime();
+			} else {
+				ps->time += glfwGetTime();
+			}
+			ps->sim = action != GLFW_RELEASE;
+		}
+	};
+
 	auto mouse_button_callback = [](GLFWwindow* window, int button, int action, int mods) {
 		particle_system* ps = static_cast<particle_system*>(glfwGetWindowUserPointer(window));
 		ps->mouse_pressed = action == GLFW_PRESS;
@@ -41,12 +53,12 @@ void particle_system::init_gl() {
 	auto cursor_position_callback = [](GLFWwindow* window, double x, double y) {
 		particle_system* ps = static_cast<particle_system*>(glfwGetWindowUserPointer(window));
 		if (ps->mouse_pressed) {
-			glm::vec3 right = normalize(cross(ps->eye, ps->up));
-			glm::vec3 up = normalize(cross(right, ps->eye));
+			glm::vec3 right = normalize(cross(ps->eye - ps->center, ps->up));
+			glm::vec3 up = normalize(cross(right, ps->eye - ps->center));
 
 			float x_delta = 0.001 * (x - ps->mouse_x);
 			float y_delta = 0.001 * (y - ps->mouse_y);
-			ps->eye = length(ps->eye) * normalize(normalize(ps->eye) + x_delta * right + y_delta * up);
+			ps->eye = ps->center + length(ps->eye - ps->center) * normalize(normalize(ps->eye - ps->center) + x_delta * right + y_delta * up);
 
 			ps->mouse_x = x;
 			ps->mouse_y = y;
@@ -56,11 +68,12 @@ void particle_system::init_gl() {
 
 	auto scroll_callback = [](GLFWwindow* window, double x, double y) {
 		particle_system* ps = static_cast<particle_system*>(glfwGetWindowUserPointer(window));
-		glm::vec3 new_eye = ps->eye - static_cast<float>(0.5 * y)* normalize(ps->eye);
+		glm::vec3 new_eye = ps->eye - static_cast<float>(0.5 * y)* normalize(ps->eye - ps->center);
 		ps->eye = length(new_eye) > 1 ? new_eye : normalize(ps->eye);
 	};
 
 	glfwSetWindowUserPointer(window, this);
+	glfwSetKeyCallback(window, key_callback);
 	glfwSetMouseButtonCallback(window, mouse_button_callback);
 	glfwSetCursorPosCallback(window, cursor_position_callback);
 	glfwSetScrollCallback(window, scroll_callback);
@@ -96,47 +109,31 @@ void particle_system::init_gl_particle() {
 	}
 
 
-	glGenVertexArrays(2, gl_partcile_vao);
+	glGenVertexArrays(2, gl_particle_vao);
 	glGenBuffers(2, gl_positions);
 	glGenBuffers(1, &gl_particle_geometry);
 	glGenBuffers(2, gl_particle_colors);
 
-	glBindVertexArray(gl_partcile_vao[0]);
-	glBindBuffer(GL_ARRAY_BUFFER, gl_positions[0]);
-	glBufferData(GL_ARRAY_BUFFER, num_particles * sizeof(cl_float4), h_particle_data.data(), GL_DYNAMIC_DRAW);
-	glEnableVertexAttribArray(0);
-	glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, nullptr);
-	glVertexAttribDivisorARB(0, 1);
+	for (int i = 0; i < 2; i++) {
+		glBindVertexArray(gl_particle_vao[i]);
+		glBindBuffer(GL_ARRAY_BUFFER, gl_positions[i]);
+		glBufferData(GL_ARRAY_BUFFER, num_particles * sizeof(cl_float4), h_particle_data.data(), GL_DYNAMIC_DRAW);
+		glEnableVertexAttribArray(0);
+		glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, nullptr);
+		glVertexAttribDivisorARB(0, 1);
 
-	glBindBuffer(GL_ARRAY_BUFFER, gl_particle_geometry);
-	glBufferData(GL_ARRAY_BUFFER, particle_geometry.size() * sizeof(GLfloat), particle_geometry.data(), GL_STATIC_DRAW);
-	glEnableVertexAttribArray(1);
-	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
+		glBindBuffer(GL_ARRAY_BUFFER, gl_particle_geometry);
+		glBufferData(GL_ARRAY_BUFFER, particle_geometry.size() * sizeof(GLfloat), particle_geometry.data(), GL_STATIC_DRAW);
+		glEnableVertexAttribArray(1);
+		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
 
-	glBindBuffer(GL_ARRAY_BUFFER, gl_particle_colors[0]);
-	glBufferData(GL_ARRAY_BUFFER, particle_colors.size() * sizeof(GLfloat), particle_colors.data(), GL_STATIC_DRAW);
-	glEnableVertexAttribArray(2);
-	glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
-	glVertexAttribDivisorARB(2, 1);
+		glBindBuffer(GL_ARRAY_BUFFER, gl_particle_colors[i]);
+		glBufferData(GL_ARRAY_BUFFER, particle_colors.size() * sizeof(GLfloat), particle_colors.data(), GL_STATIC_DRAW);
+		glEnableVertexAttribArray(2);
+		glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
+		glVertexAttribDivisorARB(2, 1);
+	}
 
-
-	glBindVertexArray(gl_partcile_vao[1]);
-	glEnableVertexAttribArray(0);
-	glBindBuffer(GL_ARRAY_BUFFER, gl_positions[1]);
-	glBufferData(GL_ARRAY_BUFFER, num_particles * sizeof(cl_float4), nullptr, GL_DYNAMIC_DRAW);
-	glEnableVertexAttribArray(0);
-	glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, nullptr);
-	glVertexAttribDivisorARB(0, 1);
-	
-	glBindBuffer(GL_ARRAY_BUFFER, gl_particle_geometry);
-	glEnableVertexAttribArray(1);
-	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
-
-	glEnableVertexAttribArray(2);
-	glBindBuffer(GL_ARRAY_BUFFER, gl_particle_colors[1]);
-	glBufferData(GL_ARRAY_BUFFER, particle_colors.size() * sizeof(GLfloat), nullptr, GL_STATIC_DRAW);
-	glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
-	glVertexAttribDivisorARB(2, 1);
 	particle::gl::print_error(glGetError(), "particle_system::init_gl_particle");
 }
 
@@ -153,15 +150,15 @@ void particle_system::init_gl_world() {
 	glBindVertexArray(gl_world_vao);
 
 	std::vector<std::vector<GLfloat>> world_geometry;
-	world_geometry.push_back(particle::create_sphere(1.f, 5, {4, 4, 0}));
-	world_geometry.push_back(particle::create_box({6, 0.2f, 6}, {4, 1, 0}, {0, 0, 1}, M_PI / 8.f));
-	world_geometry.push_back(particle::create_box({6, 0.2f, 6}, {-3, 8, 0}, {0, 0, 1}, -M_PI / 8.f));
+//	world_geometry.push_back(particle::create_sphere(1.f, 5, {4, 4, 0}));
+//	world_geometry.push_back(particle::create_box({6, 0.2f, 6}, {4, 1, 0}, {0, 0, 1}, M_PI / 8.f));
+//	world_geometry.push_back(particle::create_box({6, 0.2f, 6}, {-3, 8, 0}, {0, 0, 1}, -M_PI / 8.f));
 
 	float radius = 4;
-	world_geometry.push_back(particle::create_box({6, 1.f, 0.5f}, {0, 0, -radius}));
-	world_geometry.push_back(particle::create_box({6, 1.f, 0.5f}, {0, 0, radius}));
+//	world_geometry.push_back(particle::create_box({6, 1.f, 0.5f}, {0, 0, -radius}));
+//	world_geometry.push_back(particle::create_box({6, 1.f, 0.5f}, {0, 0, radius}));
 	world_geometry.push_back(particle::create_box({0.5f, 1.f, 6}, {-radius, 0, 0}));
-	world_geometry.push_back(particle::create_box({0.5f, 1.f, 6}, {radius, 0, 0}));
+//	world_geometry.push_back(particle::create_box({0.5f, 1.f, 6}, {radius, 0, 0}));
 	for (std::vector<GLfloat> object: world_geometry) {
 		h_world_positions.insert(h_world_positions.end(), object.begin(), object.end());
 	}
@@ -181,14 +178,12 @@ void particle_system::init_cl() {
 	particle::cl::build_program(device, context, &cl_bitonic_program, "shaders/cl/bitonic_sort.cl");
 	particle::cl::build_program(device, context, &cl_bvh_program, "shaders/cl/bvh.cl");
 	
-
 	cl_int error = CL_SUCCESS;
-	cl_particle_positions[0] = clCreateFromGLBuffer(context, CL_MEM_READ_WRITE, gl_positions[0], nullptr);
-	cl_particle_positions[1] = clCreateFromGLBuffer(context, CL_MEM_READ_WRITE, gl_positions[1], nullptr);
-	cl_particle_positions_old[0] = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, num_particles * sizeof(cl_float4), h_particle_data.data(), nullptr);
-	cl_particle_positions_old[1] = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR, num_particles * sizeof(cl_float4), nullptr, nullptr);
-	cl_particle_colors[0] = clCreateFromGLBuffer(context, CL_MEM_READ_WRITE, gl_particle_colors[0], nullptr);
-	cl_particle_colors[1] = clCreateFromGLBuffer(context, CL_MEM_READ_WRITE, gl_particle_colors[1], nullptr);
+	for (int i = 0; i < 2; i++) {
+		cl_particle_positions[i] = clCreateFromGLBuffer(context, CL_MEM_READ_WRITE, gl_positions[i], nullptr);
+		cl_particle_positions_old[i] = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, num_particles * sizeof(cl_float4), h_particle_data.data(), nullptr);
+		cl_particle_colors[i] = clCreateFromGLBuffer(context, CL_MEM_READ_WRITE, gl_particle_colors[i], nullptr);
+	}
 	cl_bvh = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR, num_bvh_branch_nodes * sizeof(cl_float4), nullptr, nullptr);
 	cl_particle_indices = clCreateBuffer(context, CL_MEM_READ_WRITE, num_particles * sizeof(cl_uint), nullptr, nullptr);
 	cl_world_positions = clCreateFromGLBuffer(context, CL_MEM_READ_WRITE, gl_world_positions, nullptr);
@@ -207,7 +202,7 @@ void particle_system::init_cl() {
 	error |= clSetKernelArg(init_indices_kernel, 0, sizeof(cl_mem), &cl_particle_indices);
 	error |= clSetKernelArg(init_indices_kernel, 1, sizeof(cl_mem), &num_particles);
 	error |= clSetKernelArg(bitonic_sort_kernel, 1, sizeof(cl_mem), &cl_particle_indices);
-	error |= clSetKernelArg(bitonic_sort_kernel, 3, sizeof(cl_uint), &num_particles);
+	error |= clSetKernelArg(bitonic_sort_kernel, 2, sizeof(cl_uint), &num_particles);
 	error |= clSetKernelArg(apply_indices_kernel, 0, sizeof(cl_mem), &cl_particle_indices);
 	error |= clSetKernelArg(apply_indices_kernel, 7, sizeof(cl_mem), &num_particles);
 	
@@ -258,7 +253,7 @@ void particle_system::sort_particles() {
 				for (int j = 0; j <= i; j++) {
 					cl_uint stride = pow(2, i - j);
 					cl_uint merge = j == 0 ? 1 : 0;
-					error |= clSetKernelArg(bitonic_sort_kernel, 2, sizeof(cl_uint), &stride);
+					error |= clSetKernelArg(bitonic_sort_kernel, 3, sizeof(cl_uint), &stride);
 					error |= clSetKernelArg(bitonic_sort_kernel, 4, sizeof(cl_uint), &merge);
 					error |= clEnqueueNDRangeKernel(command_queue, bitonic_sort_kernel, 1, nullptr, &global_work_size, &local_work_size, NULL, nullptr, nullptr);
 
@@ -280,7 +275,7 @@ void particle_system::sort_particles() {
 	std::swap(cl_particle_positions_old[0], cl_particle_positions_old[1]);
 	std::swap(cl_particle_colors[0], cl_particle_colors[1]);
 
-	std::swap(gl_partcile_vao[0], gl_partcile_vao[1]);
+	std::swap(gl_particle_vao[0], gl_particle_vao[1]);
 	particle::cl::print_error(error, "particle_system::sort_particles");
 
 //	clEnqueueReadBuffer(command_queue, cl_particle_positions_old[0], true, 0, h_particle_data.size() * sizeof(cl_float), h_particle_data.data(), NULL, nullptr, nullptr);
@@ -345,8 +340,8 @@ void particle_system::render() {//	glFrontFace(GL_CW);
 	glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
 
 	glUseProgram(gl_particle_program);
-	glBindVertexArray(gl_partcile_vao[0]);
-	//	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+	glBindVertexArray(gl_particle_vao[0]);
+	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 	glm::mat4 projection = glm::perspective(0.9272952f, static_cast<float>(width) / static_cast<float>(height), 0.001f, 1000.0f);
 	glm::mat4 view = lookAt(eye, center, up);
 	glUniformMatrix4fv(2, 1, GL_FALSE, value_ptr(projection * view));
@@ -358,7 +353,6 @@ void particle_system::render() {//	glFrontFace(GL_CW);
 	glDrawArrays(GL_TRIANGLES, 0, 3 * num_triangles);
 
 	glfwSwapBuffers(window);
-	//IUHISSHKUIUSDSOHNDOSODNOISDNSNIO??????????????????????????????????????????????????????   GL SWAP BUFFERS NUR JEDER 2t wird angezeigt
 	particle::gl::print_error(glGetError(), "particle_system::render");
 }
 
@@ -369,8 +363,10 @@ void particle_system::enter_main_loop() {
 	double last_time = glfwGetTime();
 	unsigned int number_frames = 0;
 
-	for (;;) {
-		simulate();
+	while (true) {
+		if (sim) {
+			simulate();
+		}
 		render();
 
 		double current_time = glfwGetTime();
@@ -388,7 +384,7 @@ particle_system::particle_system(size_t local_work_size, std::vector<cl_float> p
 	local_work_size(local_work_size),
 	num_particles(positions.size() / 3),
 	num_bvh_branch_nodes(pow(2, ceil(log(num_particles) / log(2))) - 1),
-	eye(0, 5, -30), center(0, 0, 0), up(0, 1, 0) {
+	eye(5, 4, 0), center(-3, 0, 0), up(0, 1, 0) {
 	for (size_t i = 0; i < radii.size(); i++) {
 		h_particle_data.push_back(positions[i * 3]);
 		h_particle_data.push_back(positions[i * 3 + 1]);
@@ -406,7 +402,6 @@ particle_system::particle_system(size_t local_work_size, std::vector<cl_float> p
 		start_index -= level_size;
 		
 	}
-
 	init_gl();
 	init_cl();
 }
@@ -414,24 +409,3 @@ particle_system::particle_system(size_t local_work_size, std::vector<cl_float> p
 
 
 particle_system::~particle_system() {}
-
-
-
-
-//	for (auto position : h_particle_positions) {
-//		std::cout << position << ' ';
-//	} std::cout << std::endl;
-
-//clEnqueueReadBuffer(command_queue, cl_particle_positions[0], true, 0, h_particle_positions.size() * sizeof(cl_float), h_particle_positions.data(), NULL, nullptr, nullptr);
-
-//	for (auto position : h_particle_positions) {
-//		std::cout << position << ' ';
-//	} std::cout << std::endl;
-
-
-
-//	bool sorted = true;
-//	for (int i = 0; i < num_particles - 1; i++) {
-//		sorted &= h_particle_positions[i] <= h_particle_positions[i + 1];
-//	}
-//	std::cout << (sorted ? "true" : "false") << " " << num_particles << std::endl;

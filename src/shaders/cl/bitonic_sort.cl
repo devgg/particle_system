@@ -1,11 +1,11 @@
 
-kernel void init_indices(global uint* indices, uint num_particles) {
+kernel void init_indices(global uint* indices, const uint num_particles) {
 	uint GID = get_global_id(0);
 	if (GID >= num_particles) return;
 	indices[GID] = GID;
 }
 
-kernel void apply_indices(global const uint* indices, global const float4* positions_in, global float4* positions_out, global const float4* positions_old_in, global float4* positions_old_out, global const float* colors_in, global float* colors_out, uint num_particles) {
+kernel void apply_indices(global const uint* indices, global const float4* positions_in, global float4* positions_out, global const float4* positions_old_in, global float4* positions_old_out, global const float* colors_in, global float* colors_out, const uint num_particles) {
 	uint GID = get_global_id(0);
 	if (GID >= num_particles) return;
 
@@ -15,7 +15,7 @@ kernel void apply_indices(global const uint* indices, global const float4* posit
 }
 
 
-kernel void bitonic_sort(global const float4* positions, global uint* indices, const uint stride, const uint num_particles, const uint merge, const uint direction) {
+kernel void bitonic_sort(global const float4* positions, global uint* indices, const uint num_particles,  const uint stride, const uint merge, const uint direction) {
 	uint GID = get_global_id(0);
 	
 	uint2 ids;

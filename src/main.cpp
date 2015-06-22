@@ -6,7 +6,7 @@
 
 int main() {
 
-	const cl_uint num_particles = 8 * 1024;
+	const cl_uint num_particles =  8 * 1024;
 
 	srand(static_cast<unsigned>(time(nullptr)));
 	auto generate_random = []() {
@@ -25,6 +25,23 @@ int main() {
 		positions[i + 2] = 2 * radius * generate_random() - radius;
 		radii[i / 3] = 0.1f;
 	}
+//
+	positions[3 * (num_particles - 4)] = -3.48f;
+	positions[3 * (num_particles - 4) + 1] = 3;
+	positions[3 * (num_particles - 4) + 2] = 1;
+
+	positions[3 * (num_particles - 3)] = -5;
+	positions[3 * (num_particles - 3) + 1] = 4;
+	positions[3 * (num_particles - 3) + 2] = 6;
+
+	positions[3 * (num_particles - 2)] = -3.5f;
+	positions[3 * (num_particles - 2) + 1] = 4;
+	positions[3 * (num_particles - 2) + 2] = 0;
+
+	positions[3 * (num_particles - 1)] = -3.48f;
+	positions[3 * (num_particles - 1) + 1] = 3;
+	positions[3 * (num_particles - 1) + 2] = 0;
+
 	particle_system(256, positions, radii).enter_main_loop();
 	return 0;
 }
