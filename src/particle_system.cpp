@@ -2,18 +2,22 @@
 
 #include "particle_system.hpp"
 #include "utility.hpp"
+#define CL_USE_DEPRECATED_OPENCL_2_0_APIS
+#include <CL/cl.h>
 #include <CL/cl_gl.h>
+
+#pragma OPENCL EXTENSION cl_khr_gl_sharing : enable
+#pragma OPENCL EXTENSION cl_khr_gl_depth_images : enable
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #define _USE_MATH_DEFINES
-#include <math.h>
-#include <iostream>
 #include <array>
+#include <iostream>
 
 
-void particle_system::init_gl() {
+void particle_system::init() {
 	if (!glfwInit())
 		exit(EXIT_FAILURE);
 	window = glfwCreateWindow(width, height, "Particle System", nullptr, nullptr);
@@ -25,7 +29,6 @@ void particle_system::init_gl() {
 	glfwMakeContextCurrent(window);
 	glewInit();
 	glViewport(0, 0, width, height);
-	glPointSize(10.f);
 
 	auto key_callback = [](GLFWwindow* window, int key, int scancode, int action, int mods) {
 		particle_system* ps = static_cast<particle_system*>(glfwGetWindowUserPointer(window));
@@ -63,7 +66,7 @@ void particle_system::init_gl() {
 			ps->mouse_x = x;
 			ps->mouse_y = y;
 		}
-		
+
 	};
 
 	auto scroll_callback = [](GLFWwindow* window, double x, double y) {
@@ -77,9 +80,49 @@ void particle_system::init_gl() {
 	glfwSetMouseButtonCallback(window, mouse_button_callback);
 	glfwSetCursorPosCallback(window, cursor_position_callback);
 	glfwSetScrollCallback(window, scroll_callback);
-
-	glEnable(GL_DEPTH_TEST);
 	glEnable(GL_CULL_FACE);
+
+	particle::cl::init_opencl(&device, &context, &command_queue);
+	particle::gl::print_error(glGetError(), "particle_system::init");
+	init_gl();
+	init_cl();
+}
+
+void particle_system::init_gl() {
+
+	glGenFramebuffers(1, &gl_framebuffer);
+	glBindFramebuffer(GL_FRAMEBUFFER, gl_framebuffer);
+
+	GLuint gl_colorbuffer;
+	glGenRenderbuffers(1, &gl_colorbuffer);
+	glBindRenderbuffer(GL_RENDERBUFFER, gl_colorbuffer);
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, width, height);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, gl_colorbuffer);
+
+	glGenTextures(1, &gl_position_texture);
+	glBindTexture(GL_TEXTURE_2D, gl_position_texture);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, width, height, 0, GL_RGBA, GL_FLOAT, nullptr);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, gl_position_texture, 0);
+
+	GLuint gl_depthbuffer;
+	glGenRenderbuffers(1, &gl_depthbuffer);
+	glBindRenderbuffer(GL_RENDERBUFFER, gl_depthbuffer);
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT32F, width, height);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, gl_depthbuffer);
+	particle::gl::print_error_framebuffer(glCheckFramebufferStatus(GL_FRAMEBUFFER), "particle_system::init_gl");
+
+	glGenTextures(1, &gl_light_texture);
+	glBindTexture(GL_TEXTURE_3D, gl_light_texture);
+	glTexImage3D(GL_TEXTURE_3D, 0, GL_RGBA32F, 16, 16, 8, 0, GL_RGBA, GL_FLOAT, nullptr);
+	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_REPEAT);
+
+
 	particle::gl::print_error(glGetError(), "particle_system::init_gl");
 	init_gl_particle();
 	init_gl_world();
@@ -94,8 +137,7 @@ void particle_system::init_gl_particle() {
 	glLinkProgram(gl_particle_program);
 	glUseProgram(gl_particle_program);
 
-	std::vector<GLfloat> particle_geometry = particle::create_sphere(1, 5);
-	GLuint gl_particle_geometry;
+	std::vector<GLfloat> particle_geometry = particle::create_sphere(1, 4);
 
 	auto generate_random = []() {
 		return static_cast<GLfloat>(rand()) / static_cast<GLfloat> (RAND_MAX);
@@ -111,6 +153,7 @@ void particle_system::init_gl_particle() {
 
 	glGenVertexArrays(2, gl_particle_vao);
 	glGenBuffers(2, gl_positions);
+	GLuint gl_particle_geometry;
 	glGenBuffers(1, &gl_particle_geometry);
 	glGenBuffers(2, gl_particle_colors);
 
@@ -149,18 +192,31 @@ void particle_system::init_gl_world() {
 	glGenVertexArrays(1, &gl_world_vao);
 	glBindVertexArray(gl_world_vao);
 
-	std::vector<std::vector<GLfloat>> world_geometry;
-//	world_geometry.push_back(particle::create_sphere(1.f, 5, {4, 4, 0}));
+	std::vector<std::vector<GLfloat>> world_positions;
+	std::vector<std::vector<GLfloat>> world_normals;
+//	world_positions.push_back(particle::create_sphere(1.f, 5, {4, 4, 0}));
+//	world_normals.push_back(particle::create_sphere_normals(5));
+
+
 //	world_geometry.push_back(particle::create_box({6, 0.2f, 6}, {4, 1, 0}, {0, 0, 1}, M_PI / 8.f));
 //	world_geometry.push_back(particle::create_box({6, 0.2f, 6}, {-3, 8, 0}, {0, 0, 1}, -M_PI / 8.f));
+	float radius = 5;
+	world_positions.push_back(particle::create_box({6, 1.f, 0.5f}, {0, 0, -radius}));
+	world_normals.push_back(particle::create_box_normals());
 
-	float radius = 4;
-//	world_geometry.push_back(particle::create_box({6, 1.f, 0.5f}, {0, 0, -radius}));
-//	world_geometry.push_back(particle::create_box({6, 1.f, 0.5f}, {0, 0, radius}));
-	world_geometry.push_back(particle::create_box({0.5f, 1.f, 6}, {-radius, 0, 0}));
-//	world_geometry.push_back(particle::create_box({0.5f, 1.f, 6}, {radius, 0, 0}));
-	for (std::vector<GLfloat> object: world_geometry) {
-		h_world_positions.insert(h_world_positions.end(), object.begin(), object.end());
+	world_positions.push_back(particle::create_box({6, 1.f, 0.5f}, {0, 0, radius}));
+	world_normals.push_back(particle::create_box_normals());
+
+	world_positions.push_back(particle::create_box({0.5f, 1.f, 6}, {-radius, 0, 0}));
+	world_normals.push_back(particle::create_box_normals());
+
+	world_positions.push_back(particle::create_box({0.5f, 1.f, 6}, {radius, 0, 0}));
+	world_normals.push_back(particle::create_box_normals());
+
+	std::vector<GLfloat> h_world_normals;
+	for (int i = 0; i < world_positions.size(); i++) {
+		h_world_positions.insert(h_world_positions.end(), world_positions[i].begin(), world_positions[i].end());
+		h_world_normals.insert(h_world_normals.end(), world_normals[i].begin(), world_normals[i].end());
 	}
 	
 	num_triangles = h_world_positions.size() / 9;
@@ -169,16 +225,34 @@ void particle_system::init_gl_world() {
 	glBufferData(GL_ARRAY_BUFFER, h_world_positions.size() * sizeof(cl_float), h_world_positions.data(), GL_STATIC_DRAW);
 	glEnableVertexAttribArray(0);
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
+
+	GLuint gl_world_normals;
+	glGenBuffers(1, &gl_world_normals);
+	glBindBuffer(GL_ARRAY_BUFFER, gl_world_normals);
+	glBufferData(GL_ARRAY_BUFFER, h_world_normals.size() * sizeof(cl_float), h_world_normals.data(), GL_STATIC_DRAW);
+	glEnableVertexAttribArray(1);
+	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
+
 	particle::gl::print_error(glGetError(), "particle_system::init_gl_world");
 }
 
-void particle_system::init_cl() {
-	particle::cl::init_opencl(&device, &context, &command_queue);
+void particle_system::init_cl() {	
 	particle::cl::build_program(device, context, &cl_particle_simulation_program, "shaders/cl/particle_simulation.cl");
 	particle::cl::build_program(device, context, &cl_bitonic_program, "shaders/cl/bitonic_sort.cl");
 	particle::cl::build_program(device, context, &cl_bvh_program, "shaders/cl/bvh.cl");
-	
+	particle::cl::build_program(device, context, &cl_cull_program, "shaders/cl/cull_lights.cl");
+
+
 	cl_int error = CL_SUCCESS;
+	move_kernel = clCreateKernel(cl_particle_simulation_program, "move", nullptr);
+	resolve_collisions_kernel = clCreateKernel(cl_particle_simulation_program, "resolve_collisions", nullptr);
+	bitonic_sort_kernel = clCreateKernel(cl_bitonic_program, "bitonic_sort", nullptr);
+	init_indices_kernel = clCreateKernel(cl_bitonic_program, "init_indices", nullptr);
+	apply_indices_kernel = clCreateKernel(cl_bitonic_program, "apply_indices", nullptr);
+	construct_bvh_kernel = clCreateKernel(cl_bvh_program, "construct_bvh", nullptr);
+	cull_lights_kernel = clCreateKernel(cl_cull_program, "cull_lights", nullptr);
+	calculate_aabb_kernel = clCreateKernel(cl_cull_program, "calculate_aabb", nullptr);
+	
 	for (int i = 0; i < 2; i++) {
 		cl_particle_positions[i] = clCreateFromGLBuffer(context, CL_MEM_READ_WRITE, gl_positions[i], nullptr);
 		cl_particle_positions_old[i] = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, num_particles * sizeof(cl_float4), h_particle_data.data(), nullptr);
@@ -187,13 +261,31 @@ void particle_system::init_cl() {
 	cl_bvh = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR, num_bvh_branch_nodes * sizeof(cl_float4), nullptr, nullptr);
 	cl_particle_indices = clCreateBuffer(context, CL_MEM_READ_WRITE, num_particles * sizeof(cl_uint), nullptr, nullptr);
 	cl_world_positions = clCreateFromGLBuffer(context, CL_MEM_READ_WRITE, gl_world_positions, nullptr);
+	cl_world_depths = clCreateFromGLTexture(context, CL_MEM_READ_ONLY, GL_TEXTURE_2D, 0, gl_position_texture, nullptr);
+	cl_culled_lights = clCreateFromGLTexture(context, CL_MEM_READ_WRITE, GL_TEXTURE_3D, 0, gl_light_texture, nullptr);
+	cl_aabbs = clCreateBuffer(context, CL_MEM_READ_WRITE, 32 * 16 * 2 * sizeof(cl_float3), nullptr, nullptr);
 
-	move_kernel = clCreateKernel(cl_particle_simulation_program, "move", nullptr);
-	resolve_collisions_kernel = clCreateKernel(cl_particle_simulation_program, "resolve_collisions", nullptr);
-	bitonic_sort_kernel = clCreateKernel(cl_bitonic_program, "bitonic_sort", nullptr);
-	init_indices_kernel = clCreateKernel(cl_bitonic_program, "init_indices", nullptr);
-	apply_indices_kernel = clCreateKernel(cl_bitonic_program, "apply_indices", nullptr);
-	construct_bvh_kernel = clCreateKernel(cl_bvh_program, "construct_bvh", nullptr);
+	/*
+	int minn = 99999999;
+	int maxn = -999999999;
+	std::vector<cl_float> temp(320 * 192);
+	for (int i = 0; i < temp.size(); i++) {
+		temp[i] = rand() % 5000;
+		if (temp[i] < minn) {
+			minn = temp[i];
+		}
+		if (temp[i] > maxn) {
+			maxn = temp[i];
+		}
+	}
+
+	cl_mem temp2 = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, temp.size() * sizeof(cl_float), temp.data(), &error);
+	*/
+	
+//	for (int i = 0; i < 16 * 16 * 8; i += 4) {
+//		std::cout << temp[i] << ' ' << temp[i + 1] << ' ' << temp[i + 2] << ' ' << temp[i + 3] << std::endl;
+//	} std::cout << std::endl;
+
 
 	cl_float time_delta_previous = 0;
 	error |= clSetKernelArg(move_kernel, 2, sizeof(cl_uint), &num_particles);
@@ -212,10 +304,13 @@ void particle_system::init_cl() {
 	error |= clSetKernelArg(resolve_collisions_kernel, 4, sizeof(cl_uint), &bvh_levels[1].second);
 	error |= clSetKernelArg(resolve_collisions_kernel, 5, sizeof(cl_mem), &cl_world_positions);
 	error |= clSetKernelArg(resolve_collisions_kernel, 6, sizeof(cl_uint), &num_triangles);
+
+	error |= clSetKernelArg(cull_lights_kernel, 0, sizeof(cl_mem), &cl_culled_lights);
+
+	error |= clSetKernelArg(calculate_aabb_kernel, 0, sizeof(cl_mem), &cl_world_depths);
+	error |= clSetKernelArg(calculate_aabb_kernel, 1, sizeof(cl_mem), &cl_aabbs);
 	particle::cl::print_error(error, "particle_system::init_cl");
 }
-
-
 
 void particle_system::move_particles() {
 	cl_int error = CL_SUCCESS;
@@ -234,7 +329,6 @@ void particle_system::sort_particles() {
 	cl_int error = CL_SUCCESS;
 	error |= clEnqueueNDRangeKernel(command_queue, init_indices_kernel, 1, nullptr, &global_work_size, &local_work_size, NULL, nullptr, nullptr);
 	
-
 //	clEnqueueReadBuffer(command_queue, cl_particle_positions_old[0], true, 0, h_particle_data.size() * sizeof(cl_float), h_particle_data.data(), NULL, nullptr, nullptr);
 //	for (int i = 0; i < h_particle_data.size() && i < 4 * 20; i += 4) {
 //		std::cout << h_particle_data[i] << ' ' << h_particle_data[i + 1] << ' ' << h_particle_data[i + 2] << ' ' << h_particle_data[i + 3] << std::endl;
@@ -306,11 +400,10 @@ void particle_system::construct_bvh() {
 	particle::cl::print_error(error, "particle_system::construct_bvh");
 }
 
-
 void particle_system::resolve_particle_collisions() {
 	cl_int error = CL_SUCCESS;
 	error |= clSetKernelArg(resolve_collisions_kernel, 2, sizeof(cl_mem), &cl_particle_positions_old[0]);
-	for (int i = 0; i < 11; i++) {
+	for (int i = 0; i < 10; i++) {
 		error |= clSetKernelArg(resolve_collisions_kernel, 0, sizeof(cl_mem), &cl_particle_positions[0]);
 		error |= clSetKernelArg(resolve_collisions_kernel, 1, sizeof(cl_mem), &cl_particle_positions[1]);
 		error |= clEnqueueNDRangeKernel(command_queue, resolve_collisions_kernel, 1, nullptr, &global_work_size, &local_work_size, NULL, nullptr, nullptr);
@@ -323,7 +416,7 @@ void particle_system::resolve_particle_collisions() {
 
 void particle_system::simulate() {
 	glFinish();
-	std::array<cl_mem, 3> cl_mem_objects = {cl_particle_positions[0], cl_particle_positions[1], cl_world_positions};
+	std::vector<cl_mem> cl_mem_objects = {cl_particle_positions[0], cl_particle_positions[1], cl_world_positions};
 	cl_int error = clEnqueueAcquireGLObjects(command_queue, cl_mem_objects.size(), cl_mem_objects.data(), NULL, nullptr, nullptr);
 	move_particles();
 	sort_particles();
@@ -334,23 +427,85 @@ void particle_system::simulate() {
 	particle::cl::print_error(error, "particle_system::simulate");
 }
 
-void particle_system::render() {//	glFrontFace(GL_CW);
-	glfwPollEvents();
-	glClearColor(0, 0, 0, 1.0f);
-	glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
+void particle_system::cull_lights() {
+	glFinish();
+	std::vector<cl_mem> cl_mem_objects = {cl_particle_positions[0], cl_world_depths, cl_culled_lights};
+	cl_int error = clEnqueueAcquireGLObjects(command_queue, cl_mem_objects.size(), cl_mem_objects.data(), NULL, nullptr, nullptr);
+	{
+		size_t global_work_size[3] = {256 * 32 * 16, 1, 1};
+		size_t local_work_size[3] = {256, 1, 1};
+		error |= clEnqueueNDRangeKernel(command_queue, calculate_aabb_kernel, 1, nullptr, global_work_size, local_work_size, NULL, nullptr, nullptr);
 
-	glUseProgram(gl_particle_program);
-	glBindVertexArray(gl_particle_vao[0]);
-	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-	glm::mat4 projection = glm::perspective(0.9272952f, static_cast<float>(width) / static_cast<float>(height), 0.001f, 1000.0f);
-	glm::mat4 view = lookAt(eye, center, up);
-	glUniformMatrix4fv(2, 1, GL_FALSE, value_ptr(projection * view));
-	glDrawArraysInstancedARB(GL_TRIANGLES, 0, pow(2, 5) * 36, num_particles);
+//		std::vector<cl_float> temp3(32 * 16 * 2 * 3);
+//		error |= clEnqueueReadBuffer(command_queue, cl_aabbs, CL_TRUE, 0, temp3.size() * sizeof(cl_float), temp3.data(), NULL, nullptr, nullptr);
+//		int a = 0;
+	}
+
+	{
+		size_t global_work_size[3] = {16, 16, 8};
+		size_t local_work_size[3] = {8, 8, 4};
+		error |= clEnqueueNDRangeKernel(command_queue, cull_lights_kernel, 3, nullptr, global_work_size, local_work_size, NULL, nullptr, nullptr);
+	}
+
+	std::vector<float> temp(16 * 16 * 8);	
+//	error |= clEnqueueReadBuffer(command_queue, cl_world_depths, true, 0, temp.size() * sizeof(cl_float), temp.data(), NULL, nullptr, nullptr);
+//	for (int i = 0; i < 16 * 16 * 8; i += 4) {
+//		std::cout << temp[i] << ' ' << temp[i + 1] << ' ' << temp[i + 2] << ' ' << temp[i + 3] << std::endl;
+//	} std::cout << std::endl;
+
+	error |= clEnqueueReleaseGLObjects(command_queue, cl_mem_objects.size(), cl_mem_objects.data(), NULL, nullptr, nullptr);
+	clFinish(command_queue);
+	particle::cl::print_error(error, "particle_system::cull_lights");
+}
+
+void particle_system::prepass(const glm::mat4& projection, const glm::mat4& view) {
+	glBindFramebuffer(GL_FRAMEBUFFER, gl_framebuffer);
+	std::vector<GLenum> draw_buffers = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+	glDrawBuffers(draw_buffers.size(), draw_buffers.data());
+
+	glEnable(GL_DEPTH_TEST);
+	glDepthFunc(GL_LESS);
+	glDepthMask(GL_TRUE);
+	glClear(GL_DEPTH_BUFFER_BIT);
+	glColorMask(0, 0, 0, 0);
+	
+	glUseProgram(gl_world_program);
+	glBindVertexArray(gl_world_vao);
+	glUniformMatrix4fv(0, 1, GL_FALSE, value_ptr(projection * view)); particle::gl::print_error(glGetError(), "0");
+	glUniform3f(1, eye.x, eye.y, eye.z); particle::gl::print_error(glGetError(), "1");
+
+	glActiveTexture(GL_TEXTURE0); particle::gl::print_error(glGetError(), "2");
+	glBindTexture(GL_TEXTURE_3D, gl_light_texture); particle::gl::print_error(glGetError(), "3");
+	
+	glDrawArrays(GL_TRIANGLES, 0, 3 * num_triangles); particle::gl::print_error(glGetError(), "4");
+	particle::gl::print_error(glGetError(), "particle_system::prepass");
+}
+
+void particle_system::render(const glm::mat4& projection, const glm::mat4& view) {
+
+	glEnable(GL_DEPTH_TEST);
+	glDepthFunc(GL_LEQUAL);
+	glColorMask(1, 1, 1, 1);
+	glClear(GL_COLOR_BUFFER_BIT);
+	glDepthMask(GL_FALSE);
 
 	glUseProgram(gl_world_program);
 	glBindVertexArray(gl_world_vao);
-	glUniformMatrix4fv(1, 1, GL_FALSE, value_ptr(projection * view));
+	glUniformMatrix4fv(0, 1, GL_FALSE, value_ptr(projection * view));
+	glUniform3f(1, eye.x, eye.y, eye.z);
 	glDrawArrays(GL_TRIANGLES, 0, 3 * num_triangles);
+
+	glDepthMask(GL_TRUE);
+
+	glUseProgram(gl_particle_program);
+	glBindVertexArray(gl_particle_vao[0]);
+	glUniformMatrix4fv(3, 1, GL_FALSE, value_ptr(projection * view));
+	glDrawArraysInstancedARB(GL_TRIANGLES, 0, pow(2, 4) * 36, num_particles);
+
+	
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, gl_framebuffer);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+	glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 
 	glfwSwapBuffers(window);
 	particle::gl::print_error(glGetError(), "particle_system::render");
@@ -364,11 +519,16 @@ void particle_system::enter_main_loop() {
 	unsigned int number_frames = 0;
 
 	while (true) {
-		if (sim) {
+		glm::mat4 projection = glm::perspective(0.9272952f, static_cast<float>(width) / static_cast<float>(height), 0.001f, 1000.0f);
+		glm::mat4 view = lookAt(eye, center, up);
+		prepass(projection, view);
+		cull_lights();
+		render(projection, view);
+
+		glfwPollEvents();
+		if(sim) {
 			simulate();
 		}
-		render();
-
 		double current_time = glfwGetTime();
 		if (current_time - last_time >= 1.0) {
 			std::cout << number_frames << " fps" << std::endl;
@@ -402,8 +562,7 @@ particle_system::particle_system(size_t local_work_size, std::vector<cl_float> p
 		start_index -= level_size;
 		
 	}
-	init_gl();
-	init_cl();
+	init();
 }
 
 

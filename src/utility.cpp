@@ -1,8 +1,8 @@
 #pragma once
-#pragma OPENCL EXTENSION cl_khr_gl_sharing : enable
 
 #include "utility.hpp"
 #include <windows.h>
+#define CL_USE_DEPRECATED_OPENCL_2_0_APIS
 #include <CL/cl_gl.h>
 
 #include <iostream>
@@ -23,6 +23,25 @@ namespace particle {
 		return buffer.str();
 	}
 
+	std::vector<GLfloat> create_box_normals(glm::vec3 rotation_vector, float rotation_angle) {
+		std::vector<GLfloat> normals = {
+			0, 0, -1,
+			0, 0, +1,
+			-1, 0, 0,
+			+1, 0, 0,
+			0, -1, 0,
+			0, +1, 0
+		};
+		std::vector<GLfloat> box_normals;
+		for (int i = 0; i < normals.size(); i += 3) {
+			for (int j = 0; j < 6; j++) {
+				box_normals.push_back(normals[i]);
+				box_normals.push_back(normals[i + 1]);
+				box_normals.push_back(normals[i + 2]);
+			}
+		}
+		return box_normals;
+	}
 
 	std::vector<GLfloat> create_box(glm::vec3 dimensions, glm::vec3 position, glm::vec3 rotation_vector, float rotation_angle) {
 		std::vector<GLfloat> box = {
@@ -78,6 +97,10 @@ namespace particle {
 		return box;
 	}
 
+	std::vector<GLfloat> create_sphere_normals(float tesselation) {
+		return create_sphere(1, tesselation);
+	}
+
 	std::vector<GLfloat> create_sphere(float radius, float tesselation, glm::vec3 position) {
 		std::vector<GLfloat> sphere = create_box({radius, radius, radius});
 		for (size_t j = 0; j < tesselation; j++) {
@@ -115,6 +138,8 @@ namespace particle {
 		return sphere;
 	}
 
+	
+
 	namespace gl {
 		GLuint compile_shader(std::string file_name, GLenum shader_type) {
 			std::string string = load_file(file_name);
@@ -142,7 +167,27 @@ namespace particle {
 
 		void print_error(GLenum error, std::string message) {
 			if (message != "") message += " - ";
-			if (error != GL_NO_ERROR) std::cout << message << glewGetErrorString(error) << std::endl;
+			if (error != GL_NO_ERROR) {
+				std::string error_string = reinterpret_cast<char const*>(glewGetErrorString(error));
+				if (error_string == "Unknown error") error_string = std::to_string(static_cast<int>(error));
+				std::cout << message << error_string << std::endl;
+			}
+		}
+
+		void print_error_framebuffer(GLenum error, std::string message) {
+			if (error == GL_FRAMEBUFFER_COMPLETE) return;
+			if (message != "") message += " - ";
+			std::string error_string;
+			switch (error) {
+				case GL_FRAMEBUFFER_UNDEFINED: error_string = "GL_FRAMEBUFFER_UNDEFINED"; break;
+				case GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT: error_string = "GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT"; break;
+				case GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT: error_string = "GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT"; break;
+				case GL_FRAMEBUFFER_INCOMPLETE_DRAW_BUFFER: error_string = "GL_FRAMEBUFFER_INCOMPLETE_DRAW_BUFFER"; break;
+				case GL_FRAMEBUFFER_INCOMPLETE_READ_BUFFER: error_string = "GL_FRAMEBUFFER_INCOMPLETE_READ_BUFFER "; break;
+				case GL_FRAMEBUFFER_UNSUPPORTED: error_string = "GL_FRAMEBUFFER_UNSUPPORTED"; break;
+				case GL_FRAMEBUFFER_INCOMPLETE_MULTISAMPLE: error_string = "GL_FRAMEBUFFER_INCOMPLETE_MULTISAMPLE"; break;
+			}
+			std::cout << message << error_string << std::endl;
 		}
 	}
 
@@ -154,12 +199,18 @@ namespace particle {
 			platform_info_text.resize(1000);
 			size_t returned_size;
 			size_t used_size = 0;
+			size_t extensions_start = 0;
 			for (cl_platform_info platform_info : platform_infos) {
 				clGetPlatformInfo(platform_id, platform_info, platform_info_text.size() - used_size, (void*)(platform_info_text.data() + used_size), &returned_size);
+				if (platform_info == CL_PLATFORM_EXTENSIONS) {
+					extensions_start = used_size;
+				}
 				used_size += returned_size;
 				platform_info_text[used_size - 1] = '\n';
 			}
 			platform_info_text.resize(used_size);
+			std::replace(platform_info_text.begin() + extensions_start, platform_info_text.end(), ' ', '\n');
+
 			std::cout << platform_info_text << std::endl;
 		}
 
@@ -173,7 +224,15 @@ namespace particle {
 				case CL_DEVICE_TYPE_ACCELERATOR: device_type_text = "CL_DEVICE_TYPE_ACCELERATOR"; break;
 				case CL_DEVICE_TYPE_DEFAULT: device_type_text = "CL_DEVICE_TYPE_DEFAULT"; break;
 			}
-			std::cout << device_type_text << std::endl;
+
+			std::string device_extensions;
+			device_extensions.resize(1000);
+			size_t string_size;
+			clGetDeviceInfo(device_id, CL_DEVICE_EXTENSIONS, device_extensions.size() * sizeof(char), &device_extensions[0], &string_size);
+			device_extensions.resize(string_size);
+			std::replace(device_extensions.begin(), device_extensions.end(), ' ', '\n');
+
+			std::cout << device_type_text << std::endl << device_extensions << std::endl;
 		}
 
 		void init_opencl(cl_device_id* device, cl_context* context, cl_command_queue* command_queue) {
@@ -320,7 +379,7 @@ namespace particle {
 				case -1003: error_string = "CL_INVALID_D3D10_RESOURCE_KHR"; break;
 				case -1004: error_string = "CL_D3D10_RESOURCE_ALREADY_ACQUIRED_KHR"; break;
 				case -1005: error_string = "CL_D3D10_RESOURCE_NOT_ACQUIRED_KHR"; break;
-				default: error_string = "Unknown OpenCL error"; break;
+				default: error_string = "Unknown OpenCL error: " + error; break;
 			}
 			std::cout << message << error_string << std::endl;
 		}

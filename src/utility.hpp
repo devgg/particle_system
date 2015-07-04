@@ -1,6 +1,7 @@
 #pragma once
 
 #include <GL/glew.h>
+#define CL_USE_DEPRECATED_OPENCL_2_0_APIS
 #include <CL/cl.h>
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -12,10 +13,13 @@ namespace particle {
 	std::string load_file(std::string file_name);
 	std::vector<GLfloat> create_box(glm::vec3 dimensions, glm::vec3 position = glm::vec3(0), glm::vec3 rotation_vector = glm::vec3(1), float rotation_angle = 0);
 	std::vector<GLfloat> create_sphere(float radius, float tesselation, glm::vec3 position = glm::vec3(0));
+	std::vector<GLfloat> create_box_normals(glm::vec3 rotation_vector = glm::vec3(1), float rotation_angle = 0);
+	std::vector<GLfloat> create_sphere_normals(float tesselation);
 
 	namespace gl {
 		GLuint compile_shader(std::string file_name, GLenum shader_type);
 		void print_error(GLenum error, std::string message = "");
+		void print_error_framebuffer(GLenum error, std::string message = "");
 	}
 
 	namespace cl {
