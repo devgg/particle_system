@@ -13,6 +13,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #define _USE_MATH_DEFINES
+#include <math.h>
 #include <array>
 #include <iostream>
 
@@ -115,7 +116,7 @@ void particle_system::init_gl() {
 
 	glGenTextures(1, &gl_light_texture);
 	glBindTexture(GL_TEXTURE_3D, gl_light_texture);
-	glTexImage3D(GL_TEXTURE_3D, 0, GL_RGBA32F, 16, 16, 8, 0, GL_RGBA, GL_FLOAT, nullptr);
+	glTexImage3D(GL_TEXTURE_3D, 0, GL_RGBA32F, 32, 16, 256, 0, GL_RGBA, GL_FLOAT, nullptr);
 	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_REPEAT);
@@ -194,23 +195,29 @@ void particle_system::init_gl_world() {
 
 	std::vector<std::vector<GLfloat>> world_positions;
 	std::vector<std::vector<GLfloat>> world_normals;
-//	world_positions.push_back(particle::create_sphere(1.f, 5, {4, 4, 0}));
+
+
+
+//	world_positions.push_back(particle::create_sphere(2.f, 5, {8, 4, 0}));
 //	world_normals.push_back(particle::create_sphere_normals(5));
-
-
-//	world_geometry.push_back(particle::create_box({6, 0.2f, 6}, {4, 1, 0}, {0, 0, 1}, M_PI / 8.f));
-//	world_geometry.push_back(particle::create_box({6, 0.2f, 6}, {-3, 8, 0}, {0, 0, 1}, -M_PI / 8.f));
-	float radius = 5;
-	world_positions.push_back(particle::create_box({6, 1.f, 0.5f}, {0, 0, -radius}));
+//
+//
+	world_positions.push_back(particle::create_box({24, 0.2f, 24}, {4, 1, 0}, {0, 0, 1}, M_PI / 24.f));
+	world_normals.push_back(particle::create_box_normals({0, 0, 1}, M_PI / 8.f));
+	world_positions.push_back(particle::create_box({12, 0.2f, 24}, {-6, 8, 0}, {0, 0, 1}, -M_PI / 24.f));
+	world_normals.push_back(particle::create_box_normals({0, 0, 1}, -M_PI / 8.f));
+//
+	float radius = 24;
+	world_positions.push_back(particle::create_box({24, 1.f, 0.5f}, {0, 0, -radius}));
 	world_normals.push_back(particle::create_box_normals());
 
-	world_positions.push_back(particle::create_box({6, 1.f, 0.5f}, {0, 0, radius}));
+	world_positions.push_back(particle::create_box({24, 1.f, 0.5f}, {0, 0, radius}));
 	world_normals.push_back(particle::create_box_normals());
 
-	world_positions.push_back(particle::create_box({0.5f, 1.f, 6}, {-radius, 0, 0}));
+	world_positions.push_back(particle::create_box({0.5f, 1.f, 24}, {-radius, 0, 0}));
 	world_normals.push_back(particle::create_box_normals());
 
-	world_positions.push_back(particle::create_box({0.5f, 1.f, 6}, {radius, 0, 0}));
+	world_positions.push_back(particle::create_box({0.5f, 1.f, 24}, {radius, 0, 0}));
 	world_normals.push_back(particle::create_box_normals());
 
 	std::vector<GLfloat> h_world_normals;
@@ -265,27 +272,6 @@ void particle_system::init_cl() {
 	cl_culled_lights = clCreateFromGLTexture(context, CL_MEM_READ_WRITE, GL_TEXTURE_3D, 0, gl_light_texture, nullptr);
 	cl_aabbs = clCreateBuffer(context, CL_MEM_READ_WRITE, 32 * 16 * 2 * sizeof(cl_float3), nullptr, nullptr);
 
-	/*
-	int minn = 99999999;
-	int maxn = -999999999;
-	std::vector<cl_float> temp(320 * 192);
-	for (int i = 0; i < temp.size(); i++) {
-		temp[i] = rand() % 5000;
-		if (temp[i] < minn) {
-			minn = temp[i];
-		}
-		if (temp[i] > maxn) {
-			maxn = temp[i];
-		}
-	}
-
-	cl_mem temp2 = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, temp.size() * sizeof(cl_float), temp.data(), &error);
-	*/
-	
-//	for (int i = 0; i < 16 * 16 * 8; i += 4) {
-//		std::cout << temp[i] << ' ' << temp[i + 1] << ' ' << temp[i + 2] << ' ' << temp[i + 3] << std::endl;
-//	} std::cout << std::endl;
-
 
 	cl_float time_delta_previous = 0;
 	error |= clSetKernelArg(move_kernel, 2, sizeof(cl_uint), &num_particles);
@@ -305,7 +291,10 @@ void particle_system::init_cl() {
 	error |= clSetKernelArg(resolve_collisions_kernel, 5, sizeof(cl_mem), &cl_world_positions);
 	error |= clSetKernelArg(resolve_collisions_kernel, 6, sizeof(cl_uint), &num_triangles);
 
-	error |= clSetKernelArg(cull_lights_kernel, 0, sizeof(cl_mem), &cl_culled_lights);
+	error |= clSetKernelArg(cull_lights_kernel, 1, sizeof(cl_mem), &cl_bvh);
+	error |= clSetKernelArg(cull_lights_kernel, 2, sizeof(cl_uint), &bvh_levels[1].second);
+	error |= clSetKernelArg(cull_lights_kernel, 3, sizeof(cl_mem), &cl_aabbs);
+	error |= clSetKernelArg(cull_lights_kernel, 4, sizeof(cl_mem), &cl_culled_lights);
 
 	error |= clSetKernelArg(calculate_aabb_kernel, 0, sizeof(cl_mem), &cl_world_depths);
 	error |= clSetKernelArg(calculate_aabb_kernel, 1, sizeof(cl_mem), &cl_aabbs);
@@ -436,14 +425,15 @@ void particle_system::cull_lights() {
 		size_t local_work_size[3] = {256, 1, 1};
 		error |= clEnqueueNDRangeKernel(command_queue, calculate_aabb_kernel, 1, nullptr, global_work_size, local_work_size, NULL, nullptr, nullptr);
 
-//		std::vector<cl_float> temp3(32 * 16 * 2 * 3);
-//		error |= clEnqueueReadBuffer(command_queue, cl_aabbs, CL_TRUE, 0, temp3.size() * sizeof(cl_float), temp3.data(), NULL, nullptr, nullptr);
-//		int a = 0;
+		std::vector<cl_float> temp3(32 * 16 * 2 * 3);
+		error |= clEnqueueReadBuffer(command_queue, cl_aabbs, CL_TRUE, 0, temp3.size() * sizeof(cl_float), temp3.data(), NULL, nullptr, nullptr);
+		int a = 0;
 	}
 
 	{
-		size_t global_work_size[3] = {16, 16, 8};
-		size_t local_work_size[3] = {8, 8, 4};
+		error |= clSetKernelArg(cull_lights_kernel, 0, sizeof(cl_mem), &cl_particle_positions[0]);
+		size_t global_work_size[3] = {32, 16, 1};
+		size_t local_work_size[3] = {32, 8, 1};
 		error |= clEnqueueNDRangeKernel(command_queue, cull_lights_kernel, 3, nullptr, global_work_size, local_work_size, NULL, nullptr, nullptr);
 	}
 
@@ -460,32 +450,33 @@ void particle_system::cull_lights() {
 
 void particle_system::prepass(const glm::mat4& projection, const glm::mat4& view) {
 	glBindFramebuffer(GL_FRAMEBUFFER, gl_framebuffer);
-	std::vector<GLenum> draw_buffers = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+	std::vector<GLenum> draw_buffers = {GL_NONE, GL_COLOR_ATTACHMENT1};
 	glDrawBuffers(draw_buffers.size(), draw_buffers.data());
 
 	glEnable(GL_DEPTH_TEST);
 	glDepthFunc(GL_LESS);
 	glDepthMask(GL_TRUE);
-	glClear(GL_DEPTH_BUFFER_BIT);
-	glColorMask(0, 0, 0, 0);
+	glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
 	
 	glUseProgram(gl_world_program);
 	glBindVertexArray(gl_world_vao);
-	glUniformMatrix4fv(0, 1, GL_FALSE, value_ptr(projection * view)); particle::gl::print_error(glGetError(), "0");
-	glUniform3f(1, eye.x, eye.y, eye.z); particle::gl::print_error(glGetError(), "1");
+	glUniformMatrix4fv(0, 1, GL_FALSE, value_ptr(projection * view));
+	glUniform3f(1, eye.x, eye.y, eye.z);
 
-	glActiveTexture(GL_TEXTURE0); particle::gl::print_error(glGetError(), "2");
-	glBindTexture(GL_TEXTURE_3D, gl_light_texture); particle::gl::print_error(glGetError(), "3");
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_3D, gl_light_texture);
 	
-	glDrawArrays(GL_TRIANGLES, 0, 3 * num_triangles); particle::gl::print_error(glGetError(), "4");
+	glDrawArrays(GL_TRIANGLES, 0, 3 * num_triangles);
 	particle::gl::print_error(glGetError(), "particle_system::prepass");
 }
 
 void particle_system::render(const glm::mat4& projection, const glm::mat4& view) {
+	glBindFramebuffer(GL_FRAMEBUFFER, gl_framebuffer);
+	std::vector<GLenum> draw_buffers = {GL_COLOR_ATTACHMENT0, GL_NONE};
+	glDrawBuffers(draw_buffers.size(), draw_buffers.data());
 
 	glEnable(GL_DEPTH_TEST);
 	glDepthFunc(GL_LEQUAL);
-	glColorMask(1, 1, 1, 1);
 	glClear(GL_COLOR_BUFFER_BIT);
 	glDepthMask(GL_FALSE);
 
@@ -510,8 +501,6 @@ void particle_system::render(const glm::mat4& projection, const glm::mat4& view)
 	glfwSwapBuffers(window);
 	particle::gl::print_error(glGetError(), "particle_system::render");
 }
-
-
 
 void particle_system::enter_main_loop() {
 	
@@ -544,7 +533,7 @@ particle_system::particle_system(size_t local_work_size, std::vector<cl_float> p
 	local_work_size(local_work_size),
 	num_particles(positions.size() / 3),
 	num_bvh_branch_nodes(pow(2, ceil(log(num_particles) / log(2))) - 1),
-	eye(5, 4, 0), center(-3, 0, 0), up(0, 1, 0) {
+	eye(15, 12, 0), center(-10, 0, 0), up(0, 1, 0) {
 	for (size_t i = 0; i < radii.size(); i++) {
 		h_particle_data.push_back(positions[i * 3]);
 		h_particle_data.push_back(positions[i * 3 + 1]);
@@ -564,7 +553,5 @@ particle_system::particle_system(size_t local_work_size, std::vector<cl_float> p
 	}
 	init();
 }
-
-
 
 particle_system::~particle_system() {}

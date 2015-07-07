@@ -40,6 +40,13 @@ namespace particle {
 				box_normals.push_back(normals[i + 2]);
 			}
 		}
+		for (size_t i = 0; i < normals.size(); i += 3) {
+			glm::vec4 normal(normals[i], normals[i + 1], normals[i + 2], 1);
+			normal = glm::rotate(glm::mat4(1), rotation_angle, rotation_vector) * normal;
+			normals[i] = normal.x;
+			normals[i + 1] = normal.y;
+			normals[i + 2] = normal.z;
+		}
 		return box_normals;
 	}
 
